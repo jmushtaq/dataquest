@@ -1,5 +1,5 @@
 import pandas as pd
-import numpy
+import numpy as np
 import re
 
 def read_csv_files(data):
@@ -106,10 +106,68 @@ def set_lat_lon(data):
 
     return data
 
+def condense_class_size(data):
+    class_size = data["class_size"]
+    class_size = class_size[class_size["GRADE "] == "09-12"]
+    class_size = class_size[class_size["PROGRAM TYPE"] == "GEN ED"]
+
+    # groupby
+    class_size = class_size.groupby("DBN").agg(np.mean)
+    class_size.reset_index(inplace=True)
+
+    data["class_size"] = class_size
+    return data
+
+def condense_demographics(data):
+    data["demographics"] = data["demographics"][data["demographics"]["schoolyear"] == 20112012]
+    return data
+
+def condense_graduation(data):
+    data["graduation"] = data["graduation"][data["graduation"]["Cohort"] == "2006"]
+    data["graduation"] = data["graduation"][data["graduation"]["Demographic"] == "Total Cohort"]
+    return data
+
+def merge(data):
+    """
+    left join  - will keep all DBN values in the left DF and assign null to those that are missing on the right
+    right join - will keep all DBN values in the right DF and assign null to those that are missing on the left
+    inner join - will keep only DBN values in common in both DF's and discard the one's missing from either DF
+    outer join - will keep all DBN values from both DF's and assign null to those that are missing in both DF's (no rows are discarded)
+    """
+    combined = data["sat_results"]
+    combined = combined.merge(data["ap_2010"], on="DBN", how="left")
+    combined = combined.merge(data["graduation"], on="DBN", how="left")
+
+    to_merge = ["class_size", "demographics", "survey", "hs_directory"]
+    for m in to_merge:
+        combined = combined.merge(data[m], on="DBN", how="inner")
+
+    print('Merge Shape: {}'.format(combined.shape))
+    data['combined'] = combined
+    return data
+
+def fillna(data):
+    combined = data["combined"]
+    combined = combined.fillna(combined.mean())
+    combined = combined.fillna(0)
+    data['combined'] = combined
+    return data
+
+def add_school_district(data):
+
+    def get_first_two_chars(dbn):
+        return dbn[0:2]
+
+    combined = data["combined"]
+    combined["school_dist"] = combined["DBN"].apply(get_first_two_chars)
+    data['combined'] = combined
+    return data
+
 def main():
     """
     from utils import nyc_high_school
     data = nyc_high_school.main()
+    data['combined']['school_dist'].unique()
     """
     data = {}
     data = read_csv_files(data)
@@ -117,6 +175,14 @@ def main():
     data = add_dbn_column(data)
     data = net_sat_results_score(data)
     data = set_lat_lon(data)
+
+    # condensing lesson
+    data = condense_class_size(data)
+    data = condense_demographics(data)
+    data = condense_graduation(data)
+    data = merge(data)
+    data = fillna(data)
+    data = add_school_district(data)
 
     return data
 
